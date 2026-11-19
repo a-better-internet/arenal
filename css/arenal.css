@@ -74,7 +74,32 @@ button, select { font: inherit; color: inherit; }
 .power[aria-pressed="false"] { border-color: var(--jade); }
 .ghost-btn[aria-pressed="true"] { background: var(--ink); color: var(--plate); }
 .sel { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
-.sel select { text-transform: none; letter-spacing: 0; color: var(--ink); max-width: 52vw; }
+.patchbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 1440px; margin: 0 auto 12px;
+}
+.field {
+  border: 1px solid var(--plate-edge); background: var(--plate); color: var(--ink); border-radius: 6px;
+  padding: 7px 10px; font: 500 15px var(--font-label); letter-spacing: .02em; box-shadow: var(--shadow); min-width: 0;
+}
+select.field { max-width: min(260px, 100%); cursor: pointer; }
+input.field { width: 190px; max-width: 100%; }
+input.field::placeholder { color: var(--ink-soft); }
+.ghost-btn:disabled { opacity: .45; cursor: default; }
+.ghost-btn.confirm { background: var(--lava); border-color: var(--lava); color: #fff; }
+.bar-sep { width: 1px; height: 24px; background: var(--plate-edge); margin: 0 4px; }
+
+/* recorder */
+.recorder { width: 100%; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.rec-btn {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--plate-edge); background: var(--ground);
+  border-radius: 5px; padding: 5px 10px; font: 700 13px var(--font-label); letter-spacing: .12em; cursor: pointer; color: var(--ink);
+}
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--lava); }
+.rec-btn[aria-pressed="true"] { background: var(--lava); border-color: var(--lava); color: #fff; }
+.rec-btn[aria-pressed="true"] .rec-dot { background: #fff; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.rec-info { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); line-height: 1.25; font-variant-numeric: tabular-nums; }
+.rec-info b { color: var(--ink); font-weight: 500; font-size: 13px; }
 
 /* ---------- rack ---------- */
 .stage { position: relative; max-width: 1440px; margin: 0 auto; container-type: inline-size; }
@@ -224,4 +249,5 @@ button, select { font: inherit; color: inherit; }
 }
 @media (prefers-reduced-motion: reduce) {
   .jack .glow { transition: none; }
+  .rec-btn[aria-pressed="true"] .rec-dot { animation: none; }
 }

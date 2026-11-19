@@ -233,6 +233,7 @@
         for (const k of m.knobs || []) body.appendChild(makeKnob(k));
         for (const s of m.sws || []) body.appendChild(makeSwitch(s));
         if (m.kind === 'out') {
+          buildRecorder(body);
           scopeCanvas = document.createElement('canvas'); scopeCanvas.className = 'scope';
           scopeCanvas.setAttribute('aria-label', 'Output oscilloscope'); scopeCanvas.setAttribute('role', 'img');
           body.appendChild(scopeCanvas);
@@ -491,25 +492,206 @@
     }
   }
 
-  // ================================================================ presets
+  // ================================================================ patches
+  // A patch = every param, every cable and both patterns. Factory patches only
+  // set params and cables; saved and imported patches carry patterns too.
+  const LS_USER = 'arenal.userpatches.v1';
+  let userPatches = (store.get(LS_USER) || []).filter((p) => p && typeof p.name === 'string');
+  let loadingPreset = false;
+
+  function seqSnapshot() {
+    const t = lastTele && lastTele.seq;
+    if (t) return { seq: patterns.map((a) => a.slice()), len: t.len.slice(), ref: t.ref.slice(), autoTune: t.autoTune, ptrnB: t.ptrnB, play: t.play };
+    return JSON.parse(JSON.stringify(store.get(LS_SEQ) || DEFAULT_SEQ));
+  }
+  function patchSnapshot(name) {
+    return {
+      format: 'arenal-patch', version: 1, name,
+      params: { ...state.params },
+      cables: state.cables.map((c) => ({ from: c.from, to: c.to, color: c.color })),
+      seq: seqSnapshot(),
+    };
+  }
+  function validSeq(q) {
+    return q && Array.isArray(q.seq) && q.seq.length === 2 && q.seq.every((a) => Array.isArray(a)) && Array.isArray(q.len);
+  }
+  function applyPatch(p) {
+    loadingPreset = true;
+    for (const id of S.params) {
+      const v = p.params && typeof p.params[id] === 'number' && isFinite(p.params[id]) ? p.params[id] : S.paramDefaults[id];
+      setParam(id, v, true);
+    }
+    state.cables = []; state.colorIdx = 0;
+    for (const c of p.cables || []) {
+      const from = Array.isArray(c) ? c[0] : c.from, to = Array.isArray(c) ? c[1] : c.to;
+      if (!S.outputs.includes(from) || !S.inputs.includes(to)) continue;
+      const color = !Array.isArray(c) && /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : nextColor();
+      state.cables = state.cables.filter((x) => x.to !== to);
+      state.cables.push({ from, to, color });
+    }
+    state.colorIdx = Math.max(state.colorIdx, state.cables.length);
+    if (validSeq(p.seq)) loadSeq(p.seq);
+    refreshControls(); sendPatch(); renderCables(); savePatchSoon();
+    loadingPreset = false;
+  }
+  function loadSeq(q) {
+    const clean = {
+      seq: [0, 1].map((i) => pad(q.seq[i].slice(0, 64).map((n) => (n | 0) & 255))),
+      len: [0, 1].map((i) => Math.max(0, Math.min(64, q.len[i] | 0))),
+      ref: [0, 1].map((i) => (q.ref && isFinite(q.ref[i]) ? +q.ref[i] : 57)),
+      autoTune: q.autoTune !== false, ptrnB: !!q.ptrnB, play: q.play !== false,
+    };
+    store.set(LS_SEQ, clean);
+    patterns = clean.seq.map((a) => a.slice());
+    if (node) node.port.postMessage({ type: 'load', state: clean });
+    renderSeq({ counter: 0, play: clean.play, rec: false, ptrnB: clean.ptrnB, ptrnA: !clean.ptrnB, len: clean.len, autoTune: clean.autoTune, note: null, ref: clean.ref, clk: false });
+    if (lastTele) lastTele.seq = { ...lastTele.seq, len: clean.len, ref: clean.ref, autoTune: clean.autoTune, ptrnB: clean.ptrnB, play: clean.play };
+  }
+
   function buildPresets() {
     const sel = $('#preset');
-    sel.innerHTML = '<option value="">Custom</option>' + PRESETS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
-    sel.addEventListener('change', () => { if (sel.value !== '') loadPreset(+sel.value); });
+    const esc = (t) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    let html = '<option value="">Custom (unsaved)</option><optgroup label="Factory">' +
+      PRESETS.map((p, i) => `<option value="f${i}">${esc(p.name)}</option>`).join('') + '</optgroup>';
+    if (userPatches.length) html += '<optgroup label="Saved">' + userPatches.map((p, i) => `<option value="u${i}">${esc(p.name)}</option>`).join('') + '</optgroup>';
+    const prev = sel.value;
+    sel.innerHTML = html;
+    if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+    updatePatchButtons();
   }
-  function markCustom() { const sel = $('#preset'); if (sel && !loadingPreset) sel.value = ''; }
-  let loadingPreset = false;
+  function updatePatchButtons() {
+    const v = $('#preset').value;
+    $('#patch-delete').disabled = !v.startsWith('u');
+    resetDeleteConfirm();
+  }
+  function markCustom() { const sel = $('#preset'); if (sel && !loadingPreset && sel.value !== '') { sel.value = ''; updatePatchButtons(); } }
   function loadPreset(i) {
     const p = PRESETS[i];
-    loadingPreset = true;
-    for (const id of S.params) setParam(id, id in p.params ? p.params[id] : S.paramDefaults[id], true);
-    state.cables = []; state.colorIdx = 0;
-    for (const [from, to] of p.cables) state.cables.push({ from, to, color: nextColor() });
-    refreshControls(); sendPatch(); renderCables(); savePatchSoon();
-    $('#preset').value = String(i);
-    loadingPreset = false;
+    applyPatch({ params: p.params, cables: p.cables });
+    $('#preset').value = 'f' + i; updatePatchButtons();
     toast(p.desc);
   }
+  function loadUser(i) {
+    const p = userPatches[i]; if (!p) return;
+    applyPatch(p);
+    $('#preset').value = 'u' + i; $('#patch-name').value = p.name; updatePatchButtons();
+    toast(`Loaded “${p.name}”`);
+  }
+  function saveUser() {
+    const input = $('#patch-name');
+    let name = input.value.trim();
+    const sel = $('#preset').value;
+    if (!name && sel.startsWith('u')) name = userPatches[+sel.slice(1)].name;
+    if (!name) { input.focus(); toast('Type a name for the patch first'); return; }
+    const snap = patchSnapshot(name);
+    snap.savedAt = new Date().toISOString();
+    let idx = userPatches.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+    const updated = idx >= 0;
+    if (updated) userPatches[idx] = snap; else { userPatches.push(snap); idx = userPatches.length - 1; }
+    store.set(LS_USER, userPatches);
+    buildPresets();
+    $('#preset').value = 'u' + idx; input.value = name; updatePatchButtons();
+    toast(updated ? `Updated “${name}”` : `Saved “${name}” in this browser`);
+  }
+  let deleteArmed = 0;
+  function resetDeleteConfirm() {
+    const b = $('#patch-delete'); clearTimeout(deleteArmed); deleteArmed = 0;
+    b.classList.remove('confirm'); b.textContent = 'Delete';
+  }
+  function deleteUser() {
+    const v = $('#preset').value; if (!v.startsWith('u')) return;
+    const b = $('#patch-delete');
+    if (!deleteArmed) {
+      b.classList.add('confirm'); b.textContent = 'Confirm delete';
+      deleteArmed = setTimeout(resetDeleteConfirm, 3000);
+      return;
+    }
+    const p = userPatches.splice(+v.slice(1), 1)[0];
+    store.set(LS_USER, userPatches);
+    $('#preset').value = ''; $('#patch-name').value = '';
+    buildPresets();
+    toast(`Deleted “${p.name}”`);
+  }
+  async function exportPatch() {
+    const name = $('#patch-name').value.trim() || ($('#preset').selectedOptions[0] || {}).text || 'patch';
+    const clean = name.replace(/^Custom.*/, 'patch');
+    const snap = patchSnapshot(clean);
+    const slug = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'patch';
+    const res = await ArenalFiles.saveFile(`arenal-${slug}.json`, new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
+    toast(res.ok ? `Exported ${res.name}` : saveError(res.code));
+  }
+  function importPatch(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let p;
+      try { p = JSON.parse(reader.result); } catch (e) { toast('That file is not valid JSON.'); return; }
+      if (!p || p.format !== 'arenal-patch' || typeof p.params !== 'object') { toast('That file is not an Arenal patch export.'); return; }
+      let name = String(p.name || file.name.replace(/\.json$/i, '')).slice(0, 40) || 'Imported';
+      while (userPatches.some((u) => u.name.toLowerCase() === name.toLowerCase())) name = name.replace(/( \d+)?$/, (m) => ' ' + ((parseInt(m, 10) || 1) + 1));
+      p.name = name;
+      applyPatch(p);
+      userPatches.push({ ...patchSnapshot(name), savedAt: new Date().toISOString() });
+      store.set(LS_USER, userPatches);
+      buildPresets();
+      $('#preset').value = 'u' + (userPatches.length - 1); $('#patch-name').value = name; updatePatchButtons();
+      toast(`Imported “${name}”`);
+    };
+    reader.readAsText(file);
+  }
+  function saveError(code) {
+    if (code === 'declined') return 'Save cancelled';
+    if (code === 'rate_limited') return 'Another save is waiting for confirmation. Try again in a moment.';
+    return 'Saving files is not available here.';
+  }
+
+  // ================================================================ recorder (24-bit WAV)
+  const MAX_REC_SECONDS = 20 * 60;
+  const rec = { on: false, chunks: [], frames: 0, ui: null, finishing: false };
+  function buildRecorder(body) {
+    const el = document.createElement('div');
+    el.className = 'recorder';
+    el.innerHTML = `<button type="button" class="rec-btn" aria-pressed="false"><span class="rec-dot"></span><span class="rec-label">RECORD</span></button>
+      <div class="rec-info"><b class="rec-time">0:00</b><br><span class="rec-fmt">24-bit WAV</span></div>`;
+    body.appendChild(el);
+    rec.ui = { btn: $('.rec-btn', el), label: $('.rec-label', el), time: $('.rec-time', el), fmt: $('.rec-fmt', el) };
+    rec.ui.btn.addEventListener('click', toggleRecord);
+  }
+  async function toggleRecord() {
+    if (rec.finishing) return;
+    if (!rec.on) {
+      await ensureAudio(); if (!node) return;
+      rec.chunks = []; rec.frames = 0; rec.on = true;
+      node.port.postMessage({ type: 'record', on: true });
+      rec.ui.fmt.textContent = `24-bit · ${(ctx.sampleRate / 1000).toFixed(1)} kHz`;
+      toast('Recording the main output');
+    } else stopRecord();
+    updateRecUI();
+  }
+  function stopRecord() {
+    if (!rec.on) return;
+    rec.on = false; rec.finishing = true;
+    node.port.postMessage({ type: 'record', on: false });
+    updateRecUI();
+  }
+  async function finishRecord() {
+    const frames = rec.frames;
+    if (!frames) { rec.finishing = false; updateRecUI(); return; }
+    const blob = ArenalFiles.encodeWav24(rec.chunks, ctx.sampleRate, 1);
+    rec.chunks = [];
+    const d = new Date(), z = (n) => String(n).padStart(2, '0');
+    const name = `arenal-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.wav`;
+    const res = await ArenalFiles.saveFile(name, blob);
+    rec.finishing = false; updateRecUI();
+    toast(res.ok ? `Saved ${res.name} (${fmtTime(frames / ctx.sampleRate)})` : saveError(res.code));
+  }
+  function fmtTime(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
+  function updateRecUI() {
+    if (!rec.ui) return;
+    rec.ui.btn.setAttribute('aria-pressed', String(rec.on));
+    rec.ui.label.textContent = rec.on ? 'STOP' : rec.finishing ? 'SAVING…' : 'RECORD';
+    rec.ui.time.textContent = fmtTime(ctx ? rec.frames / ctx.sampleRate : 0);
+  }
+
   function refreshControls() {
     for (const k of Object.values(knobs)) k.draw();
     for (const s of Object.values(switches)) s.draw();
@@ -559,6 +741,13 @@
       if (m.pattern) patterns = m.pattern;
       lastTele = m;
       scheduleFrame();
+    } else if (m.type === 'rec') {
+      if (rec.on || rec.finishing) {
+        rec.chunks.push(m.data); rec.frames += m.data.length;
+        if (rec.on && rec.frames >= MAX_REC_SECONDS * ctx.sampleRate) { stopRecord(); toast('Recording stopped at 20 minutes'); }
+      }
+    } else if (m.type === 'recdone') {
+      finishRecord();
     } else if (m.type === 'save') {
       store.set(LS_SEQ, m.state);
     }
@@ -572,6 +761,7 @@
     renderSeq(t.seq);
     S.outputs.forEach((id, i) => { const j = jacks[id]; if (j) j.glow.style.opacity = Math.min(1, t.peaks[i] * 0.9).toFixed(2); });
     drawScope(t.scope);
+    if (rec.on) updateRecUI();
   }
 
   function drawScope(buf) {
@@ -643,9 +833,21 @@
       if (Array.isArray(saved.cables)) state.cables = saved.cables.filter((c) => S.outputs.includes(c.from) && S.inputs.includes(c.to));
       state.colorIdx = state.cables.length;
     }
-    buildPresets();
     buildRack();
-    if (!saved) $('#preset').value = '0';
+    buildPresets();
+    if (!saved) { $('#preset').value = 'f0'; updatePatchButtons(); }
+    $('#preset').addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v.startsWith('f')) loadPreset(+v.slice(1));
+      else if (v.startsWith('u')) loadUser(+v.slice(1));
+      else updatePatchButtons();
+    });
+    $('#patch-save').addEventListener('click', saveUser);
+    $('#patch-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveUser(); } });
+    $('#patch-delete').addEventListener('click', deleteUser);
+    $('#patch-export').addEventListener('click', exportPatch);
+    $('#patch-import').addEventListener('click', () => $('#patch-file').click());
+    $('#patch-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importPatch(f); e.target.value = ''; });
     sendPatch();
     renderCables();
     $('#power').addEventListener('click', togglePower);

@@ -42,13 +42,23 @@ Ported from the softPop pattern generator firmware:
 * Patterns, QUANT and the selected pattern are kept in browser storage, like the original EEPROM.
 * Patch **TRACK** to record the pitch of any other signal.
 
+## Patches and recording
+
+* **Save** stores the current patch (every knob, switch, cable and both patterns) in this browser
+  under the name you type. Saving with an existing name updates it. **Delete** asks for a second click.
+* **Export** writes the patch to a `.json` file; **Import** loads one back and adds it to your saved patches.
+* **RECORD** on the OUTPUT module captures the main output as a mono 24-bit PCM WAV at the audio
+  device's sample rate (TPDF-dithered, up to 20 minutes per take). When Arenal runs as a hosted
+  claude.ai page, the WAV is delivered inside a `.zip`, because the host doesn't accept `.wav` downloads.
+
 Keyboard: `A`–`;` play notes, `Z`/`X` octave, hold `Space` to record, `1`/`2` patterns, `Q` QUANT.
 
 ## Files
 
 * `js/spec.js`: modules, jacks, knobs and normalled routes (shared by UI and engine)
 * `js/engine-worklet.js`: DSP engine (AudioWorkletProcessor)
-* `js/app.js`: UI, patch cables, presets, keyboard
+* `js/app.js`: UI, patch cables, patches, recorder, keyboard
+* `js/files.js`: 24-bit WAV encoder, zip writer, file saving
 * `css/arenal.css`: styling
 
 ## License and credit

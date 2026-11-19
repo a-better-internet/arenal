@@ -20,13 +20,22 @@
   </div>
   <div class="controls">
     <button id="power" class="power" type="button" aria-pressed="false"><span class="power-led"></span><span class="power-text">Start audio</span></button>
-    <label class="sel"><span>Patch</span>
-      <select id="preset"></select>
-    </label>
     <button id="ghost" type="button" class="ghost-btn" aria-pressed="false" title="Fade cables so you can reach the knobs under them">Fade cables</button>
     <button id="clear" type="button" class="ghost-btn" title="Remove every cable (normalled routes stay)">Unplug all</button>
   </div>
 </header>
+
+<div class="patchbar" role="group" aria-label="Patches">
+  <label class="sel" for="preset"><span>Patch</span></label>
+  <select id="preset" class="field"></select>
+  <input id="patch-name" class="field" type="text" maxlength="40" placeholder="Name this patch" autocomplete="off" aria-label="Patch name">
+  <button id="patch-save" type="button" class="ghost-btn">Save</button>
+  <button id="patch-delete" type="button" class="ghost-btn" disabled>Delete</button>
+  <span class="bar-sep" aria-hidden="true"></span>
+  <button id="patch-export" type="button" class="ghost-btn" title="Save the current patch, including both patterns, as a .json file">Export</button>
+  <button id="patch-import" type="button" class="ghost-btn" title="Load a patch from an exported .json file">Import</button>
+  <input id="patch-file" type="file" accept=".json,application/json" hidden>
+</div>
 
 <main id="stage" class="stage">
   <div id="rack" class="rack"></div>
@@ -47,6 +56,8 @@
   <div class="guide-col">
     <h2>Keyboard</h2>
     <p><kbd>A</kbd>–<kbd>;</kbd> play OSC A (white keys), <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> <kbd>O</kbd> <kbd>P</kbd> sharps, <kbd>Z</kbd>/<kbd>X</kbd> octave. Hold <kbd>Space</kbd> to record, <kbd>1</kbd>/<kbd>2</kbd> for pattern A/B, <kbd>Q</kbd> toggles QUANT.</p>
+    <p><b>Patches</b> store every knob, switch, cable and both patterns. Export writes them to a file you can import later or share.</p>
+    <p><b>Record</b> on the OUTPUT module captures the main output as a 24-bit WAV at the audio device's sample rate.</p>
     <p>Knobs: drag up or down (hold Shift for fine), scroll, arrow keys, double-click to reset.</p>
     <p class="credit">Pattern recorder and quantizer ported from the open-source softPop firmware by Václav Peloušek / Bastl Instruments (CC BY-SA 3.0).</p>
   </div>
@@ -55,6 +66,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="js/spec.js"></script>
+<script src="js/files.js"></script>
 <script src="js/app.js"></script>
 <!--/ARENAL:BODY-->
 </body>

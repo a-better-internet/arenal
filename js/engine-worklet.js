@@ -66,6 +66,7 @@ class ArenalProcessor extends AudioWorkletProcessor {
 
     this.rungReg = (Math.random() * 255) | 0; this.rungClk = false; this.rungOut = 0;
     this.shClk = false; this.shHeld = 0; this.shOut = 0;
+    this.recording = false; this.recBuf = null; this.recPos = 0;
     this.envClk = false; this.envStage = 0; this.envLevel = 0;
     this.ic1 = 0; this.ic2 = 0;
     this.dcX = 0; this.dcY = 0;
@@ -116,6 +117,10 @@ class ArenalProcessor extends AudioWorkletProcessor {
         }
         break;
       case 'button': this.button(m.id, m.down); break;
+      case 'record':
+        if (m.on) { this.recBuf = new Float32Array(16384); this.recPos = 0; this.recording = true; }
+        else { this.flushRec(); this.recording = false; this.port.postMessage({ type: 'recdone' }); }
+        break;
       case 'key':
         if (m.gate) { this.keyOffset = m.offset; this.keyRetrig = 48; }
         this.keyGate = m.gate;
@@ -135,6 +140,13 @@ class ArenalProcessor extends AudioWorkletProcessor {
         break;
       }
     }
+  }
+
+  flushRec() {
+    if (!this.recBuf || this.recPos === 0) return;
+    const chunk = this.recBuf.slice(0, this.recPos);
+    this.port.postMessage({ type: 'rec', data: chunk }, [chunk.buffer]);
+    this.recPos = 0;
   }
 
   saveState(withPattern) {
@@ -453,6 +465,10 @@ class ArenalProcessor extends AudioWorkletProcessor {
       const dc = y - this.dcX + 0.9975 * this.dcY; this.dcX = y; this.dcY = dc;
       y = fastTanh(dc * 0.9);
       outL[s] = y; if (outR) outR[s] = y;
+      if (this.recording) {
+        this.recBuf[this.recPos++] = y;
+        if (this.recPos === this.recBuf.length) this.flushRec();
+      }
       this.scope[this.scopePos] = y; this.scopePos = (this.scopePos + 1) & 2047;
 
       // telemetry peaks
